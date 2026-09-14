@@ -4,3 +4,8 @@ Build/*
 out/*
 CMakeUserPresets.json
 APIDevKit-*/
+Build-*/
+*.bak
+_showa-backup-*/
+__pycache__/
+*.pyc
