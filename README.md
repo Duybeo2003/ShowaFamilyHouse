@@ -1,6 +1,8 @@
 # ShowaBridge v0.1 for Archicad 25
 
-`ShowaBridge/Ping` is a read-only custom Add-On command. It verifies the native C++ Add-On path from Archicad's Python Connection without creating or modifying model elements.
+Private C++ bridge for Archicad 25, called from the Archicad Python Connection.
+Commands: `Ping`, `GetElementCounts`, `GetProjectInfo`, `GetStories`,
+`CreateWall`, `CreateSlab`, and `GetElementInfo` (slab inspection).
 
 Expected response:
 
@@ -31,7 +33,7 @@ The `AddOnCommandTest` reference folder from the input archive is not required b
 Open PowerShell in `ShowaAddonTemplate-ac25` and run:
 
 ```powershell
-.\build_windows.ps1
+.\build_windows.bat
 ```
 
 The script uses the already verified toolchain:
@@ -75,6 +77,67 @@ Success output begins with:
 SHOWA BRIDGE PING: OK
 ```
 
-## v0.1 safety boundary
+## Slab test and verified results (2026-09-15)
 
-This version registers only `ShowaBridge/Ping`. It has no menu command, does not call `ACAPI_Element_Create`, and does not change the BIM model.
+Run `scripts/06_test_create_slab.py` with the **0. Ground Floor plan open**.
+It requires one existing slab, checks the active story both before dry-run and
+immediately before creation, then creates one 2000 x 1500 mm slab, thickness
+200 mm, at (15000, 2000) mm. Inputs are mm; C++ converts to metres.
+Close any modal dialog before running. A story guard cannot prevent every
+Archicad modal dialog or a change of window during execution.
+
+Verified in the live project before adding GetElementInfo:
+
+- Dry-run: slabs 1 -> 1, created=false.
+- Create: slabs 1 -> 2, created=true, errorCode=0.
+- Returned GUID: `2A9BB665-9B3E-43E7-A408-B84023A6B08D`.
+- Undo: slabs 2 -> 1; walls remained 4. This GUID is now historical.
+- Incorrect expected count, nonexistent story, zero width, negative depth,
+  and zero thickness were rejected without changing counts.
+
+Creating on Story 0 while Story 2 was visible caused the Information dialog
+and Python error 4001 **after the slab had been created**. After such an error,
+close the dialog and count elements before retrying; never assume rollback.
+Use Ctrl+Z once after a successful creation test and verify the baseline.
+
+## GetElementInfo (read-only, slab support)
+
+Input: `{"guid":"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"}`.
+Success returns `ok`, `errorCode`, `message`, `guid`, `elementType`,
+`storyIndex`, `thicknessMm`, `levelOffsetMm`, `storyElevationMm`,
+`referenceElevationMm`, `referencePlaneLocation`, and `polygon`.
+The absolute reference elevation is the story elevation plus the slab's
+reference-plane offset; it is not necessarily the slab top elevation.
+Reference-plane codes follow AC25: 0=top, 1=core top, 2=core bottom, 3=bottom.
+
+Polygon `coordinates` contain xMm/yMm and each contour's repeated closing
+point. `contourEnds` and arc beginIndex/endIndex retain Archicad's **1-based**
+indices; JSON array positions are 0-based. Arc angles are radians.
+Errors return only ok/errorCode/message/guid; no fabricated geometry.
+Invalid/null GUID: -10201; unsupported element type: -10202;
+missing story: -10203; incomplete memo: -10204. API errors are passed through.
+
+After reloading the new APX, run `scripts/07_test_get_element_info.py` to
+inspect existing slabs without changing the model. From a terminal, optionally
+pass a slab GUID as its argument. Live verification of this new command is
+pending reload of the APX; the earlier CreateSlab results above do not verify it.
+
+Use the repository's `scripts` folder in Python Palette so it runs the current
+tests rather than older copies in the parent project's scripts folder.
+
+The updated creation test requires GetElementInfo to be installed before any
+write. It reads back the new GUID and checks all four corners, closure, absence
+of arcs, story 0, and the requested 200 mm thickness. A geometry failure after
+creation leaves the slab available for inspection; Undo once before retrying.
+
+If the loaded Debug APX is locked (LNK1168), link to a separate staging directory:
+
+```powershell
+cmake --build Build-v142-lpxml --config Debug -- /p:OutDir=U:\My_Home\ShowaFamilyHouse\ShowaAddonTemplate-ac25\Build-v142-lpxml\Pending\
+```
+
+The staged binary is `Build-v142-lpxml/Pending/ShowaBridge.apx`. Reload this
+binary in Add-On Manager (replace the existing ShowaBridge entry rather than
+loading duplicate IDs). If Archicad requires a restart, handle project saving
+explicitly before restarting. The Debug binary remains the previously loaded
+version until rebuilt after it is unloaded.

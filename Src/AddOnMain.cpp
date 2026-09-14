@@ -4,6 +4,7 @@
 #include "ObjectState.hpp"
 #include "ResourceIds.hpp"
 #include "RS.hpp"
+#include "GetElementInfoCommand.hpp"
 
 
 namespace {
@@ -1323,8 +1324,13 @@ GSErrCode Initialize (void)
     if (err != NoError)
         return err;
 
-    return ACAPI_Install_AddOnCommandHandler (
+    err = ACAPI_Install_AddOnCommandHandler (
         GS::NewOwned<CreateSlabCommand> ()
+    );
+    if (err != NoError)
+        return err;
+    return ACAPI_Install_AddOnCommandHandler (
+        GS::NewOwned<GetElementInfoCommand> ()
     );
 }
 

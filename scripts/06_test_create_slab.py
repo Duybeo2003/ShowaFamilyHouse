@@ -1,4 +1,5 @@
 import json
+import math
 
 from archicad import ACConnection
 
@@ -29,6 +30,19 @@ def execute(command_name, parameters=None):
     )
 
 
+def require_ground_floor():
+    stories = execute("GetStories")
+    if not stories.get("ok") or stories.get("activeStory") != 0:
+        raise RuntimeError(
+            "Safety stop: open the 0. Ground Floor plan before this test. "
+            "No slab was created."
+        )
+
+
+require_ground_floor()
+probe = execute("GetElementInfo", {"guid": "00000000-0000-0000-0000-000000000000"})
+if probe.get("ok") is not False or probe.get("errorCode") != -10201:
+    raise RuntimeError("Reload the APX with GetElementInfo before the creation test.")
 counts_before = execute("GetElementCounts")
 
 if not counts_before.get("ok", False):
@@ -91,6 +105,7 @@ print("SHOWA BRIDGE CREATE SLAB DRY-RUN: OK")
 print(json.dumps(dry_run_response, indent=2))
 
 parameters["dryRun"] = False
+require_ground_floor()
 
 create_response = execute(
     "CreateSlab",
@@ -131,6 +146,30 @@ if (
 
 print("SHOWA BRIDGE CREATE SLAB: OK")
 print(json.dumps(create_response, indent=2))
+info = execute("GetElementInfo", {"guid": create_response["guid"]})
+if not info.get("ok"):
+    raise RuntimeError(f"Slab was created but geometry read-back failed: {info}. Undo once.")
+polygon = info["polygon"]
+points = polygon["coordinates"]
+expected_corners = [(15000.0, 2000.0), (17000.0, 2000.0),
+                    (17000.0, 3500.0), (15000.0, 3500.0)]
+actual_corners = sorted((p["xMm"], p["yMm"]) for p in points[:-1])
+geometry_ok = (
+    info["storyIndex"] == 0
+    and math.isclose(info["thicknessMm"], 200.0, abs_tol=1e-6)
+    and polygon["contourEnds"] == [5]
+    and polygon["arcs"] == []
+    and len(points) == 5
+    and points[0] == points[-1]
+    and len(actual_corners) == 4
+    and all(math.isclose(a, b, abs_tol=1e-6)
+            for actual, expected in zip(actual_corners, sorted(expected_corners))
+            for a, b in zip(actual, expected))
+)
+if not geometry_ok:
+    raise RuntimeError(f"Slab geometry differs from requested dimensions: {info}. Undo once.")
+print("SLAB GEOMETRY READ-BACK: OK")
+print(json.dumps(info, indent=2))
 print("ELEMENT COUNTS AFTER CREATE:")
 print(json.dumps(counts_after_create, indent=2))
 print("NEXT: Use Ctrl+Z once in Archicad, then run 02_test_element_counts.py")
